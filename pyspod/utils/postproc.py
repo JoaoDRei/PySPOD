@@ -433,9 +433,6 @@ def plot_2d_modes_at_frequency(results_path, freq_req,
                 plt.colorbar(real, cax=real_cax)
                 plt.colorbar(imag, cax=imag_cax)
 
-                # overlay coastlines if required
-                real_ax = _apply_2d_coastlines(coastlines, real_ax)
-                imag_ax = _apply_2d_coastlines(coastlines, imag_ax)
 
                 # axis management
                 real_ax = _set_2d_axes_limits(real_ax, x1, x2)
@@ -485,9 +482,7 @@ def plot_2d_modes_at_frequency(results_path, freq_req,
             # save or show plots
             tmp_name = filename
             if filename:
-                basename, ext = splitext(filename)
-                tmp_name = f'{basename}_var{var_id}_mode{mode_id}{ext}'
-            _save_show_plots(tmp_name, path, plt)
+                plt.savefig(filename+"mode%d"%(mode_id)+".png")
 
 # def plot_2d_mode_slice_vs_time(results_path, freq_req, freq,
 #     vars_idx=[0], modes_idx=[0], x1=None, x2=None, max_each_mode=False,
@@ -886,9 +881,7 @@ def plot_3d_modes_slice_at_frequency(
             # save or show plots
             tmp_name = filename
             if filename:
-                basename, ext = splitext(filename)
-                tmp_name = f'{basename}_var{var_id}_mode{mode_id}{ext}'
-            _save_show_plots(tmp_name, path, plt)
+                plt.savefig(filename)
 
 def plot_mode_tracers(
     results_path, freq_req, freq, coords_list,
@@ -987,10 +980,13 @@ def plot_mode_tracers(
             # save or show plots
             tmp_name = filename
             if filename:
-                basename, ext = splitext(filename)
-                tmp_name = \
-                    f'{basename}_coords{coords}_var{var_id}_mode{mode_id}{ext}'
-            _save_show_plots(tmp_name, path, plt)
+                plt.savefig(filename)
+
+def matrix_coeffs(coeffs, coeffs_idx=[0]):
+    matrix=np.empty((len(coeffs[coeffs_idx[0], :]),0))
+    for i in coeffs_idx:
+        matrix=np.hstack((matrix, coeffs[i,:].reshape(-1,1).real))
+    return matrix
 
 def plot_coeffs(coeffs, coeffs_idx=[0], equal_axes=False,
     figsize=(12,8), path='CWD', filename=None):
@@ -998,6 +994,7 @@ def plot_coeffs(coeffs, coeffs_idx=[0], equal_axes=False,
     # initialize figure
     fig = plt.figure(figsize=figsize)
     for ci in coeffs_idx:
+        plt.figure()
         plt.plot(coeffs[ci,:], 'k-')
         plt.xlabel('time')
         plt.ylabel(f'coeff {ci}')
@@ -1012,9 +1009,32 @@ def plot_coeffs(coeffs, coeffs_idx=[0], equal_axes=False,
         # save or show plots
         tmp_name = filename
         if filename:
-            basename, ext = splitext(filename)
-            tmp_name = f'{basename}_coeff_id{ci}{ext}'
-        _save_show_plots(tmp_name, path, plt)
+            plt.savefig(filename + "%d"%(ci)+".png")
+
+def plot_coeffspar(coeffs, coeffs_idx=[0,1], equal_axes=False,
+    figsize=(12,8), path='CWD', filename=None):
+    c0 = coeffs_idx[0]
+    c1 = coeffs_idx[1]
+    if len(coeffs_idx) !=2:
+        raise ValueError('Input 2 indices of coefficients for 2d plot')
+    # initialize figure
+    fig = plt.figure(figsize=figsize)
+    plt.plot(coeffs[c0,:], coeffs[c1, :] )
+    plt.xlabel('Coeff of the %dth mode'%(c0))
+    plt.ylabel('Coeff of the %dth  mode'%(c1))
+
+    # axis management
+    if equal_axes:
+        plt.axis('equal')
+
+    # padding between elements
+    plt.tight_layout()
+
+    # save or show plots
+    tmp_name = filename
+    if filename:
+        plt.savefig(filename + "%d-%d"%(c0,c1) + ".png")
+    
 
 def plot_2d_data(X, time_idx=[0], vars_idx=[0], x1=None, x2=None,
     xticks=None, yticks=None, equal_axes=False, title='', coastlines='',
@@ -1094,9 +1114,7 @@ def plot_2d_data(X, time_idx=[0], vars_idx=[0], x1=None, x2=None,
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(contour, cax=cax)
 
-            # overlay coastlines if required
-            ax = _apply_2d_coastlines(coastlines, ax)
-
+ 
             # axis management
             if equal_axes:
                 ax.set_aspect('equal')
@@ -1111,9 +1129,7 @@ def plot_2d_data(X, time_idx=[0], vars_idx=[0], x1=None, x2=None,
             # save or show plots
             tmp_name = filename
             if filename:
-                basename, ext = splitext(filename)
-                tmp_name = f'{basename}_var{var_id}_time{time_id}{ext}'
-            _save_show_plots(tmp_name, path, plt)
+                plt.savefig(filename+"%d"%(time_id))
 
 def plot_data_tracers(X, coords_list, x=None, time_limits=[0,10],
     vars_idx=[0], title='', figsize=(12,8), path='CWD', filename=None):

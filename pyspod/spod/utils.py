@@ -116,7 +116,7 @@ def compute_coeffs_op(
     n_modes_save = params['n_modes_save']
     data = _set_dtype(data, dtype)
     weights = _set_dtype(weights, dtype)
-
+   
     ## initialize frequencies
     if ((T_lb is None) or (T_ub is None)) and (freq_idx is None):
         f_idx_lb = 0
@@ -131,44 +131,44 @@ def compute_coeffs_op(
         freq_idx = np.arange(f_idx_lb, f_idx_ub + 1)
     utils_par.pr0(f'- identified frequencies: {time.time() - st} s.', comm)
     st = time.time()
-
+    
     ## initialize coeffs matrix
     shape_tmp = (n_freq_r*n_modes_save, nt)
     coeffs = np.zeros(shape_tmp, dtype=dt_complex)
-
+   
     ## distribute data and weights if parallel
     data, max_axis, _ = utils_par.distribute_data(data, comm)
     weights = utils_par.distribute_dimension(weights, max_axis, comm)
-
+    
     ## add axis for single variable
     if not isinstance(data,np.ndarray): data = data.values
     if (nv == 1) and (data.ndim != xdim + 2):
         data = data[...,np.newaxis]
     xsize = weights.size
     xshape_nv = data[0,...].shape
-
+    
     ## flatten spatial x variable dimensions
     data = np.reshape(data, [nt, xsize])
     weights = np.reshape(weights, [xsize, 1])
-
+    
     ## compute time mean and subtract from data (reuse the one from fit?)
     lt_mean = np.mean(data, axis=0); data = data - lt_mean
     utils_par.pr0(f'- data and time mean: {time.time() - st} s.', comm)
     st = time.time()
-
+    
     ## get modes
     phir = _get_modes(results_dir, n_freq_r,
         freq_idx, max_axis, xsize, n_modes_save, dt_complex, comm)
     utils_par.pr0(f'- retrieved modes: {time.time() - st} s.', comm)
     st = time.time()
-
+    
     ## create coeffs folder
     coeffs_dir = os.path.join(results_dir, f'coeffs_{f_idx_lb}_{f_idx_ub}')
     if savedir is not None: coeffs_dir = os.path.join(coeffs_dir, savedir)
     if rank == 0:
         if not os.path.exists(coeffs_dir): os.makedirs(coeffs_dir)
     utils_par.barrier(comm)
-
+  
     # evaluate the coefficients by oblique projection
     coeffs = _oblique_projection(
         phir, weights, data, tol=tol, svd=svd, dtype=dtype, comm=comm)
@@ -176,7 +176,7 @@ def compute_coeffs_op(
     st = time.time()
     utils_par.barrier(comm)
     del data, weights
-
+   
     ## save auxiliary files
     file_phir = os.path.join(coeffs_dir, 'modes_r.npy')
     file_lt_mean = os.path.join(coeffs_dir, 'ltm.npy')
@@ -438,9 +438,9 @@ def compute_coeffs_conv(
     return file_coeffs, coeffs_dir
 
 
-def compute_reconstruction(
+def compute_reconstruction( #mudei esta função e adicionei umas tantas outras para fazer a reonstrução de apenas alguns modos
     coeffs_dir, time_idx, coeffs=None, savedir=None, filename=None,
-    dtype='double', comm=None):
+    dtype='double', comm=None, n_modes_save=None):
     '''
     Reconstruct original data through oblique projection.
 
@@ -507,11 +507,19 @@ def compute_reconstruction(
     max_axis = params['max_axis']
     phir = utils_par.distribute_dimension(phir, max_axis, comm)
     lt_mean = utils_par.distribute_dimension(lt_mean, max_axis, comm)
-
+    n_modes=n_modes_save
     if coeffs.ndim == 2:
-        Q_rec = _compute_rec_op(phir, coeffs, lt_mean, time_idx, comm)
+        if n_modes_save:
+            #só para saber check check nmodessave
+            Q_rec = _compute_rec_op_mi(phir, coeffs, lt_mean, time_idx, comm, n_modes_save)
+        else:
+            Q_rec = _compute_rec_op(phir, coeffs, lt_mean, time_idx, comm)
     elif coeffs.ndim == 3:
-        Q_rec = _compute_rec_conv(phir, coeffs, lt_mean, time_idx, comm)
+        if n_modes_save:
+            #só para saber check check nmodessave
+            Q_rec = _compute_rec_conv_mi(phir, coeffs, lt_mean, time_idx, comm, n_modes_save)
+        else:
+            Q_rec = _compute_rec_conv(phir, coeffs, lt_mean, time_idx, comm)
     else:
         raise ValueError('dimension of `coeffs` not recognized.')
 
@@ -572,6 +580,48 @@ def _compute_rec_conv(phir, coeffs, lt_mean, time_idx, comm=None):
     st = time.time()
     return Q_rec
 
+def _compute_rec_op_mi(phir, coeffs, lt_mean, time_idx, comm=None, n_modes_save=None):  #funções que tomam como argumento o número de modos a plotar (para reconstruir apenas com os mais importantes)
+    st = time.time()
+    if n_modes_save is not None:
+        phir = phir[..., :n_modes_save]
+        coeffs = coeffs[:n_modes_save, ...]
+    ## phi x coeffs
+    Q_rec = phir @ coeffs[:,time_idx]
+    utils_par.pr0(f'- phi x a completed: {time.time() - st} s.', comm)
+    del phir, coeffs
+    st = time.time()
+    ## add time mean
+    Q_rec = Q_rec + lt_mean[...,None]
+    utils_par.pr0(f'- added time mean: {time.time() - st} s.', comm)
+    st = time.time()
+    return Q_rec
+
+
+def _compute_rec_conv_mi(phir, coeffs, lt_mean, time_idx, n_modes_save=None, comm=None): #funções que tomam como argumento o número de modos a plotar (para reconstruir apenas com os mais importantes)
+   
+    st = time.time()
+    ## reshape modes and coeffs
+    nt = coeffs.shape[1]
+    xshape_nv = phir[...,0,0].shape
+    n_freq_r = coeffs.shape[0]
+    if n_modes_save is not None:
+        phir = phir[..., :n_modes_save]
+        coeffs = coeffs[:n_modes_save, ...]
+    phir = np.reshape(phir, (xshape_nv + (n_modes_save * n_freq_r,)))
+    coeffs = np.einsum('ijk->ikj', coeffs)
+    coeffs = np.reshape(coeffs, [n_modes_save * n_freq_r, nt])
+    ## phi x coeffs
+    Q_rec = phir @ coeffs[:,time_idx]
+    utils_par.pr0(f'- phi x a completed: {time.time() - st} s.', comm)
+    del phir, coeffs
+    st = time.time()
+    ## add time mean
+    Q_rec = Q_rec + lt_mean[...,None]
+    utils_par.pr0(f'- added time mean: {time.time() - st} s.', comm)
+    st = time.time()
+    return Q_rec
+
+
 
 def _oblique_projection(phir, weights, data, tol, svd=False,
     dtype='double', comm=None):
@@ -579,9 +629,11 @@ def _oblique_projection(phir, weights, data, tol, svd=False,
     ## get dtypes
     dt_float, dt_complex = _get_dtype(dtype)
     data = data.T
+    print("Test11")
     M = phir.conj().T @ (weights * phir)
     Q = phir.conj().T @ (weights * data)
-    del weights, data, phir
+    del weights, data, 
+    print("test12")
     M = utils_par.allreduce(data=M, comm=comm)
     Q = utils_par.allreduce(data=Q, comm=comm)
     coeffs = np.zeros([Q.shape[1], Q.shape[0]])
@@ -589,6 +641,7 @@ def _oblique_projection(phir, weights, data, tol, svd=False,
         u, l, v = np.linalg.svd(M)
         l_inv = np.zeros([len(l),len(l)], dtype=dt_complex)
         l_max = np.max(l)
+        print("Test13")
         for i in range(len(l)):
             if (l[i] > tol * l_max):
                 l_inv[i,i] = 1 / l[i]
